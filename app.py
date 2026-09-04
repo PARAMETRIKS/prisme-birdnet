@@ -90,7 +90,12 @@ def prediction_records(predictions, limit: int):
         confidence = float(row.get("confidence", row.get("score", 0)) or 0)
         scientific, common = split_species(species)
         # Ignore non-bird events such as "Human vocal" and weak guesses.
-        if not scientific or not common or confidence < minimum_confidence:
+        if (
+            not scientific
+            or not common
+            or scientific.casefold() == common.casefold()
+            or confidence < minimum_confidence
+        ):
             continue
         key = common.casefold()
         candidate = {"common_name": common, "scientific_name": scientific, "confidence": confidence}
