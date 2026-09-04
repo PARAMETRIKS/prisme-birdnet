@@ -40,6 +40,16 @@ def normalize_rows(predictions):
         return predictions
     if isinstance(predictions, tuple):
         return list(predictions)
+    if hasattr(predictions, "to_structured_array"):
+        structured = predictions.to_structured_array()
+        rows = []
+        for record in structured:
+            row = {}
+            for name in structured.dtype.names or ():
+                value = record[name]
+                row[name] = value.item() if hasattr(value, "item") else value
+            rows.append(row)
+        return rows
     if hasattr(predictions, "to_pylist"):
         return predictions.to_pylist()
     if hasattr(predictions, "to_dicts"):
