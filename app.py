@@ -81,6 +81,7 @@ def normalize_rows(predictions):
 
 def prediction_records(predictions, limit: int):
     rows = normalize_rows(predictions)
+    minimum_confidence = float(os.environ.get("BIRDNET_MIN_CONFIDENCE", "0.15"))
     best = {}
     for row in rows:
         if not isinstance(row, dict):
@@ -88,7 +89,8 @@ def prediction_records(predictions, limit: int):
         species = row.get("species_name") or row.get("common_name") or row.get("species") or row.get("label")
         confidence = float(row.get("confidence", row.get("score", 0)) or 0)
         scientific, common = split_species(species)
-        if not common:
+        # Ignore non-bird events such as "Human vocal" and weak guesses.
+        if not scientific or not common or confidence < minimum_confidence:
             continue
         key = common.casefold()
         candidate = {"common_name": common, "scientific_name": scientific, "confidence": confidence}
