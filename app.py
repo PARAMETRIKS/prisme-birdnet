@@ -8,7 +8,7 @@ from threading import Lock
 import birdnet
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-app = FastAPI(title="Prisme BirdNET", version="1.1.0")
+app = FastAPI(title="Prisme BirdNET", version="1.2.0")
 _model = None
 _model_lock = Lock()
 
@@ -32,17 +32,56 @@ def split_species(value: str):
     return "", value.replace("_", " ")
 
 
-def prediction_records(predictions, limit: int):
+def normalize_rows(predictions):
+    """Normalize the dataframe/table containers returned by BirdNET releases."""
+    if predictions is None:
+        return []
+    if isinstance(predictions, list):
+        return predictions
+    if isinstance(predictions, tuple):
+        return list(predictions)
+    if hasattr(predictions, "to_pylist"):
+        return predictions.to_pylist()
+    if hasattr(predictions, "to_dicts"):
+        return predictions.to_dicts()
+    if hasattr(predictions, "to_pandas"):
+        return predictions.to_pandas().to_dict(orient="records")
     if hasattr(predictions, "to_dict"):
-        rows = predictions.to_dict(orient="records")
-    elif isinstance(predictions, list):
-        rows = predictions
-    else:
-        rows = []
+        try:
+            converted = predictions.to_dict(orient="records")
+        except TypeError:
+            converted = predictions.to_dict()
+        if isinstance(converted, list):
+            return converted
+        if isinstance(converted, dict):
+            columns = {}
+            for key, values in converted.items():
+                if isinstance(values, dict):
+                    columns[key] = list(values.values())
+                elif isinstance(values, (list, tuple)):
+                    columns[key] = list(values)
+                else:
+                    columns[key] = [values]
+            row_count = max((len(values) for values in columns.values()), default=0)
+            return [
+                {key: values[index] for key, values in columns.items() if index < len(values)}
+                for index in range(row_count)
+            ]
+    return []
 
+
+def prediction_records(predictions, limit: int):
+    rows = normalize_rows(predictions)
     best = {}
     for row in rows:
-        species = row.get("species_name") or row.get("species") or row.get("label")
+        if not isinstance(row, dict):
+            continue
+        species = (
+            row.get("species_name")
+            or row.get("common_name")
+            or row.get("species")
+            or row.get("label")
+        )
         confidence = float(row.get("confidence", row.get("score", 0)) or 0)
         scientific, common = split_species(species)
         if not common:
@@ -101,8 +140,16 @@ async def analyze(
             raise HTTPException(status_code=422, detail="unsupported or unreadable audio")
         try:
             predictions = get_model().predict(str(wav))
-            results = prediction_records(predictions, limit)
+            normalized = normalize_rows(predictions)
+            results = prediction_records(normalized, limit)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"BirdNET analysis failed: {type(exc).__name__}") from exc
 
-    return {"results": results, "count": len(results)}
+    response = {"results": results, "count": len(results)}
+    if not results:
+        response["diagnostic"] = {
+            "container": type(predictions).__name__,
+            "rows": len(normalized),
+            "columns": list(normalized[0].keys()) if normalized and isinstance(normalized[0], dict) else [],
+        }
+    return response
