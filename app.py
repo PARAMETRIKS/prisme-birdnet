@@ -8,7 +8,7 @@ from threading import Lock
 import birdnet
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-app = FastAPI(title="Prisme BirdNET", version="1.0.0")
+app = FastAPI(title="Prisme BirdNET", version="1.1.0")
 _model = None
 _model_lock = Lock()
 
@@ -18,7 +18,9 @@ def get_model():
     if _model is None:
         with _model_lock:
             if _model is None:
-                _model = birdnet.load("acoustic", "3.0", "onnx")
+                # V2.4 via LiteRT is small enough for Render's 512 MB free tier.
+                # The V3 ONNX checkpoint alone is ~542 MB and caused OOM restarts.
+                _model = birdnet.load("acoustic", "2.4", "tf", library="litert")
     return _model
 
 
@@ -59,7 +61,7 @@ def prediction_records(predictions, limit: int):
 @app.get("/")
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "Prisme BirdNET", "model": "BirdNET 3.0 ONNX"}
+    return {"ok": True, "service": "Prisme BirdNET", "model": "BirdNET 2.4 LiteRT"}
 
 
 @app.post("/analyze")
